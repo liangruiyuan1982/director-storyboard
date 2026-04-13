@@ -244,8 +244,20 @@ def phase_lookdev(project_dir, model="glm51"):
 
 # ─── LLM 调用 ────────────────────────────────────────────
 
-def run_llm(prompt_file, input_data, model="glm51", output_file=None):
-    """调用 LLM via api.py"""
+def run_llm(prompt_file, input_data, model="glm51", output_file=None,
+              validation=None, max_retries=3):
+    """
+    调用 LLM via call_model.py，支持验证和重试
+    
+    validation: dict, 可选，期望的验证规则
+      - type: "array" | "object"
+      - key: 期望的数组键名 (如 beats, panels)
+      - min_items: 数组最小长度
+      - expected_count: 期望的精确数组长度
+    """
+    # 直接使用 call_model.py 的 call_with_retry（避免子进程开销）
+    from call_model import call_with_retry
+    
     prompt_path = SKILL_DIR / "references" / prompt_file
     with open(prompt_path, encoding="utf-8") as f:
         template = f.read()
@@ -253,22 +265,33 @@ def run_llm(prompt_file, input_data, model="glm51", output_file=None):
     input_json = json.dumps(input_data, ensure_ascii=False, indent=2)
     full_prompt = template + f"\n\n## 输入数据\n```json\n{input_json}\n```\n\n请输出 JSON。"
     
-    cmd = [
-        sys.executable,
-        str(SKILL_DIR / "scripts" / "call_model.py"),
-        "--prompt", full_prompt,
-        "--model", model,
-        "--output", output_file or "/tmp/llm_output.json"
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    if result.returncode != 0:
-        raise RuntimeError(f"LLM call failed: {result.stderr}")
+    out_file = output_file or "/tmp/llm_output.json"
     
-    data = load_json(output_file or "/tmp/llm_output.json")
-    # api.py returns (text, elapsed, usage) tuple
-    if isinstance(data, tuple):
-        return data[0] if len(data) >= 1 else data
-    return data
+    # 获取模型的最大 token 限制
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent.parent / "ai-storyboard-pro" / "scripts"))
+    from config import MODELS
+    model_cfg = MODELS.get(model, {})
+    model_max_tokens = model_cfg.get("max_tokens")
+    if model_max_tokens is None:
+        model_max_tokens = model_cfg.get("extra_body", {}).get("max_tokens")
+    if model_max_tokens is None:
+        model_max_tokens = 16384
+    
+    try:
+        data = call_with_retry(
+            model=model,
+            system="你是专业AI助手。只返回JSON，不要其他文字。",
+            prompt=full_prompt,
+            validation=validation,
+            max_retries=max_retries,
+            max_tokens=model_max_tokens,
+            output_file=out_file
+        )
+        return data
+    except Exception as e:
+        print(f"❌ run_llm 失败: {e}", file=sys.stderr)
+        raise
 
 # ─── 进度追踪 ────────────────────────────────────────────
 
@@ -409,164 +432,18 @@ body{{font-family:system-ui;max-width:900px;margin:0 auto;padding:20px}}
     return out
 
 def generate_storyboard_viewer(project_dir):
-    """生成带批注系统的导演工作台 HTML"""
-    panels = load_json(Path(project_dir) / "panels.json").get("panels", [])
-    versions = []
-    vp_file = Path(project_dir) / "viewer_versions.json"
-    if vp_file.exists():
-        versions = load_json(vp_file).get("versions", [])
-    
-    total_dur = sum(p.get("duration", 5) for p in panels)
-    version_select = "".join(
-        f'<option value="{v["id"]}">{v["label"]} ({v["timestamp"][:16]})</option>'
-        for v in versions
-    ) or '<option value="">当前版本</option>'
-    
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>导演分镜工作台</title>
-<style>
-body{{font-family:system-ui;max-width:1200px;margin:0 auto;padding:16px;background:#0f0f0f;color:#e5e5e5}}
-.header{{display:flex;align-items:center;gap:16px;border-bottom:2px solid #333;padding-bottom:12px;margin-bottom:16px}}
-.header h1{{color:#fff;margin:0;font-size:22px}}
-.header-meta{{display:flex;gap:12px;font-size:13px;color:#888}}
-.tag{{padding:2px 8px;border-radius:4px;font-size:11px}}
-.tag-red{{background:#e63946;color:#fff}}
-.tag-orange{{background:#f4a261;color:#000}}
-.version-bar{{background:#1a1a2e;padding:10px 16px;border-radius:6px;margin-bottom:16px;display:flex;align-items:center;gap:12px;font-size:13px}}
-.version-bar select{{background:#252525;color:#e5e5e5;border:1px solid #444;padding:4px 8px;border-radius:4px}}
-.btn{{background:#7c3aed;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}}
-.panel{{display:grid;grid-template-columns:180px 1fr;gap:12px;border:1px solid #2a2a2a;border-radius:8px;padding:14px;margin:12px 0;background:#1a1a1a}}
-.panel:hover{{border-color:#7c3aed}}
-.pid{{font-size:18px;font-weight:bold;color:#e63946}}
-.meta{{color:#888;font-size:12px;margin-top:4px}}
-.scene{{color:#ccc;font-size:13px;margin:8px 0}}
-.note-section{{margin-top:10px}}
-.note-label{{color:#888;font-size:11px;margin-bottom:4px}}
-.note-input{{width:100%;background:#252525;color:#e5e5e5;border:1px dashed #7c3aed;border-radius:4px;padding:8px;font-size:13px;min-height:60px;resize:vertical}}
-.save-note{{background:#7c3aed;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:4px}}
-.notes-list{{margin-top:8px}}
-.note-entry{{background:#1e1e2e;padding:6px 10px;border-radius:4px;margin-top:4px;font-size:12px;color:#aaa}}
-.note-entry .meta{{color:#666;font-size:11px}}
-</style>
-</head><body>
-<div class="header">
-  <h1>🎬 导演分镜工作台</h1>
-  <div class="header-meta">
-    <span class="tag tag-red">总时长: {total_dur}s</span>
-    <span class="tag tag-orange">Panels: {len(panels)}</span>
-  </div>
-</div>
-
-<div class="version-bar">
-  <span style="color:#888">版本:</span>
-  <select id="version-select">{version_select}</select>
-  <span style="color:#888">|</span>
-  <button class="btn" onclick="saveVersion()">📸 保存快照</button>
-  <button class="btn" onclick="saveNotes()">💾 保存批注</button>
-  <span id="save-status" style="color:#4ade80;font-size:12px;margin-left:auto"></span>
-</div>
-"""
-    for p in panels:
-        pid = p.get("panel_id", "")
-        beat_id = p.get("beat_id", "")
-        duration = p.get("duration", 5)
-        shot_type = p.get("shot_type", "中景")
-        cam = p.get("camera_movement", "Static")
-        transition = p.get("transition", "cut")
-        voiceover = p.get("voiceover", "")
-        performance_notes = p.get("performance_notes", "")
-        emotional_subtext = p.get("emotional_subtext", "")
-        directive = p.get("performance_directive", "")
-        color = p.get("dominant_color", "")
-        
-        # Load saved notes for this panel
-        notes = []
-        notes_file = Path(project_dir) / "panel_notes.json"
-        if notes_file.exists():
-            all_notes = load_json(notes_file)
-            notes = all_notes.get(pid, [])
-        
-        notes_html = "".join(
-            f"<div class='note-entry'><div class='meta'>{n.get('timestamp','')[:16]} | {n.get('author','')}</div><div>{n.get('text','')}</div></div>"
-            for n in notes[-3:]  # Show last 3 notes
-        )
-        
-        html += f"""
-<div class="panel" id="panel-{pid}">
-  <div>
-    <div class="pid">{pid} <span style="color:#888;font-size:13px">{beat_id}</span></div>
-    <div class="meta">{shot_type} | {duration}s | {cam}</div>
-    <div class="meta" style="margin-top:4px">
-      <span style="color:#e63946">{transition}</span>
-      {" | " + color if color else ""}
-    </div>
-  </div>
-  <div>
-    <div class="scene">🎥 {p.get('scene_description','')[:100]}...</div>
-    {f"<div style='color:#2563eb;font-size:13px;margin-top:4px'>🎤 {voiceover[:60]}...</div>" if voiceover else ""}
-    <div class="note-section">
-      <div class="note-label">表演笔记</div>
-      <div style="color:#ccc;font-size:13px">{performance_notes[:80]}...</div>
-      {f"<div style='color:#a8dadc;font-size:12px;margin-top:4px'>潜: {emotional_subtext[:60]}...</div>" if emotional_subtext else ""}
-      {f"<div style='color:#f4a261;font-size:12px;font-style:italic;margin-top:4px'>导演: {directive[:60]}...</div>" if directive else ""}
-    </div>
-    <div class="note-section">
-      <div class="note-label">导演批注</div>
-      <textarea class="note-input" id="note-{pid}" placeholder="输入批注..."></textarea>
-      <div class="notes-list" id="notes-{pid}">{notes_html}</div>
-    </div>
-  </div>
-</div>
-"""
-    
-    html += """
-<script>
-const projectDir = location.pathname.split('/projects/')[1].split('/')[0];
-
-async function saveNotes() {
-  const panels = document.querySelectorAll('.panel');
-  const allNotes = {};
-  for (const p of panels) {
-    const pid = p.id.replace('panel-', '');
-    const ta = document.getElementById('note-' + pid);
-    if (ta && ta.value.trim()) {
-      allNotes[pid] = allNotes[pid] || [];
-      allNotes[pid].push({
-        text: ta.value.trim(),
-        author: '导演',
-        timestamp: new Date().toISOString()
-      });
-    }
-  }
-  // Save via fetch to backend
-  const resp = await fetch('/save-notes', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({project: projectDir, notes: allNotes})
-  });
-  document.getElementById('save-status').textContent = '✅ 已保存';
-  setTimeout(() => document.getElementById('save-status').textContent = '', 2000);
-}
-
-async function saveVersion() {
-  const label = prompt('版本标签（如"调整B05后"）:');
-  if (!label) return;
-  const resp = await fetch('/save-version', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({project: projectDir, label})
-  });
-  document.getElementById('save-status').textContent = '✅ 快照已保存: ' + label;
-  setTimeout(() => document.getElementById('save-status').textContent = '', 3000);
-}
-</script>
-</body></html>"""
-
-    out = Path(project_dir) / "viewer.html"
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"✅ viewer.html: {out}")
-    return out
+    """生成带批注系统的导演工作台 HTML（调用 generate_viewer.py）"""
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(SKILL_DIR / "scripts" / "generate_viewer.py"), Path(project_dir).name],
+        capture_output=True, text=True, timeout=30,
+        cwd=str(SKILL_DIR)
+    )
+    if result.returncode == 0:
+        print(result.stdout.strip())
+    else:
+        print(f"⚠️  viewer 生成失败: {result.stderr[:200]}")
+    return Path(project_dir) / "viewer.html"
 
 # ─── Phase 核心 ──────────────────────────────────────────
 
@@ -604,7 +481,9 @@ def phase2_beats(project_dir, model="glm51"):
     story_text = open(Path(project_dir) / "story.txt", encoding="utf-8").read()
     story_dna = load_json(Path(project_dir) / "story_dna.json")
     intent = load_json(Path(project_dir) / "director_intent.json")
-    beats = run_llm("beat_analysis.md", {"story_text": story_text, "story_dna": story_dna, "director_intent": intent}, model=model)
+    # 验证：beats 数组必须非空
+    beats_validation = {"type": "object", "key": "beats", "min_items": 1}
+    beats = run_llm("beat_analysis.md", {"story_text": story_text, "story_dna": story_dna, "director_intent": intent}, model=model, validation=beats_validation)
     save_json(Path(project_dir) / "story_beats.json", beats)
     generate_beats_viewer(project_dir)
     update_progress(project_dir, "phase2", "waiting_gate", "等待 Gate 0 确认")
@@ -661,15 +540,25 @@ def phase4_cinematography(project_dir, model="glm51"):
     }, model=model)
     save_json(Path(project_dir) / "photography.json", photo)
     
-    # Phase 4d: Acting
-    print("  [4d] Acting...")
+    # Phase 4d: Acting（带验证：确保返回所有 beats）
+    print(f"  [4d] Acting ({len(beats.get('beats',[]))} beats)...")
     chars = load_json(Path(project_dir) / "characters.json")
     chars_min = {"characters": [
         {k: v for k, v in c.items()
          if k in ("name","aliases","personality_tags","role_level")}
         for c in chars.get("characters", [])
     ]}
-    acting = run_llm("acting.md", {"story_beats": beats_min, "characters": chars_min, "director_intent": intent}, model=model)
+    # 验证：acting.json 必须有 panels 数组，长度 >= beat 数量
+    acting_validation = {
+        "type": "object",
+        "key": "panels",
+        "min_items": len(beats.get("beats", []))
+    }
+    acting = run_llm("acting.md",
+                    {"story_beats": beats_min, "characters": chars_min, "director_intent": intent},
+                    model=model,
+                    validation=acting_validation,
+                    max_retries=3)
     save_json(Path(project_dir) / "acting.json", acting)
     
     # Phase 4e: 分镜组装
@@ -693,11 +582,36 @@ def assemble_panels(project_dir):
     cs = load_json(Path(project_dir) / "color_script.json")
     intent = load_json(Path(project_dir) / "director_intent.json")
     
-    visual_map = {}
-    for cv in char_vis.get("character_visuals", []):
+    # Build beat → appearance_id mapping from expected_appearances
+    beat_to_appearance = {}  # {beat_id: {char_name: appearance_id}}
+    char_first = {}  # {char_name: default appearance_id}
+    for c in chars.get("characters", []):
+        cname = c["name"]
+        ea_list = c.get("expected_appearances", [])
+        char_first[cname] = ea_list[0].get("appearance_id", ea_list[0].get("id", 0)) if ea_list else 0
+        for ea in ea_list:
+            bid = ea.get("beat_id", "")
+            if bid:
+                if bid not in beat_to_appearance:
+                    beat_to_appearance[bid] = {}
+                aid = ea.get("appearance_id", ea.get("id", 0))
+                beat_to_appearance[bid][cname] = aid
+
+    # Build character visual description map
+    # Handle both {"character_visuals": [...]} and {"characters": [...]} structures
+    vis_map = {}  # {(char_name, appearance_id): description}
+    char_visuals_root = char_vis.get("character_visuals", char_vis.get("characters", []))
+    for cv in char_visuals_root:
+        cname = cv.get("name", "")
         for app in cv.get("appearances", []):
-            visual_map[(cv["name"], app["id"])] = app["descriptions"][0] if app["descriptions"] else ""
-    char_first = {c["name"]: (c.get("expected_appearances", [])[0]["id"] if c.get("expected_appearances") else 0) for c in chars.get("characters", [])}
+            # Handle both "id" and "appearance_id", "description" and "descriptions"
+            aid = app.get("id", app.get("appearance_id", 0))
+            # description (singular string) or descriptions (array)
+            desc = app.get("description", "")
+            if not desc:
+                desc_list = app.get("descriptions", [])
+                desc = desc_list[0] if desc_list else ""
+            vis_map[(cname, aid)] = desc
     
     panels = []
     for i, beat in enumerate(beats):
@@ -705,6 +619,43 @@ def assemble_panels(project_dir):
         shot = next((s for s in photo.get("shots", []) if s.get("beat_id") == beat_id), {})
         act = next((a for a in acting.get("panels", []) if a.get("beat_id") == beat_id), {})
         csbeat = next((c for c in cs.get("beats", []) if c.get("beat_id") == beat_id), {})
+
+        # Determine which characters appear in this beat and their appearance_ids
+        beat_chars = beat.get("characters", [])
+        beat_app_map = beat_to_appearance.get(beat_id, {})
+        panel_char_prompts = []
+        panel_char_names = []
+        panel_char_appearances = []
+        def infer_appearance(beat, char_first_aid=0):
+            """Smart fallback: infer appearance_id from beat keywords when no explicit mapping exists."""
+            scene = beat.get("scene", "") + beat.get("content", "") + beat.get("emotion", "") + beat.get("visual_hint", "")
+            if any(kw in scene for kw in ["跑", "疲惫", "汗水", "翻山", "运动", "汗渍", "喘", "负荷"]):
+                return 1  # 运动/疲惫状态
+            if any(kw in scene for kw in ["清晨", "释然", "日出", "晨光", "宁静", "终点", "完成", "背影"]):
+                return 2  # 精神升华/清晨状态
+            return char_first_aid  # 默认日常状态
+
+        if beat_chars:
+            for cname in beat_chars:
+                if beat_id in beat_to_appearance:
+                    aid = beat_app_map.get(cname, char_first.get(cname, 0))
+                else:
+                    aid = infer_appearance(beat, char_first.get(cname, 0))
+                panel_char_names.append(cname)
+                panel_char_appearances.append({"name": cname, "appearance_id": aid})
+                desc = vis_map.get((cname, aid), "")
+                if desc:
+                    panel_char_prompts.append(desc[:200])
+        elif char_vis.get("character_visuals") or char_vis.get("characters"):
+            # Fallback: all characters appear in all beats (backward compat)
+            for cname, aid in char_first.items():
+                if beat_id not in beat_to_appearance:
+                    aid = infer_appearance(beat, aid)
+                panel_char_names.append(cname)
+                panel_char_appearances.append({"name": cname, "appearance_id": aid})
+                desc = vis_map.get((cname, aid), "")
+                if desc:
+                    panel_char_prompts.append(desc[:200])
         
         q6 = intent.get("q6_transition_philosophy", "Mix")
         if q6 == "硬切": transition = "cut"
@@ -712,12 +663,90 @@ def assemble_panels(project_dir):
         elif q6 == "Fade": transition = "fade"
         else: transition = csbeat.get("transition_to_next", "cut") or "cut"
         
-        video_prompt = " ".join(filter(None, [
-            shot.get("camera_movement", "Static"),
-            beat.get("visual_hint", ""),
-            act.get("performance_notes", ""),
-            csbeat.get("dominant_color", "")
-        ]))
+        appearance_refs = []
+        for item in panel_char_appearances:
+            appearance_refs.append(f"{item['name']}(appearance_{item['appearance_id']})")
+        role_ref = "、".join(appearance_refs)
+        aspect_ratio = photo.get("global_style", {}).get("aspect_ratio", "16:9") if isinstance(photo, dict) else "16:9"
+        shot_type = shot.get("shot_type", "中景")
+        cam_move = shot.get("camera_movement", "Static")
+        lighting = shot.get("lighting", "")
+        visual_hint = beat.get("visual_hint", "")
+        # deeper cleaning for legacy prefixes / video-ish tags
+        changed = True
+        while changed:
+            changed = False
+            for prefix in ["特写：", "近景：", "中景：", "全景：", "远景：", "快速蒙太奇：", "慢动作：", "摄影机", "镜头"]:
+                if visual_hint.startswith(prefix):
+                    visual_hint = visual_hint[len(prefix):].strip(" ：，。;")
+                    changed = True
+        for noise in ["慢动作", "快速蒙太奇", "中景：", "近景：", "特写：", "远景：", "全景："]:
+            visual_hint = visual_hint.replace(noise, "")
+        visual_hint = re.sub(r"[；;]+", "，", visual_hint)
+        visual_hint = re.sub(r"。{2,}", "。", visual_hint).strip(" ，。")
+        perf = act.get("performance_notes", "")
+        # If performance is empty-shot but beat clearly needs a human image, synthesize a static action cue
+        if perf in ("空镜头", "", "N/A") and any(kw in (beat.get("content", "") + beat.get("visual_hint", "")) for kw in ["跑", "疲惫", "翻山", "步伐", "背影"]):
+            if any(kw in (beat.get("content", "") + beat.get("visual_hint", "")) for kw in ["疲惫", "翻山"]):
+                perf = "疲惫跑者的身体在一次短暂停顿中微微下沉，呼吸负荷清晰可见"
+            elif any(kw in (beat.get("content", "") + beat.get("visual_hint", "")) for kw in ["背影", "步伐"]):
+                perf = "背影在前进动作的一瞬间定格，步伐稳定，身体保持持续推进"
+        freeze_action = act.get("freeze_action", "")
+        body_tension = act.get("body_tension", "")
+        energy_state = act.get("energy_state", "")
+        if freeze_action in ("", "N/A"):
+            freeze_action = perf if perf not in ("", "N/A") else "无明确动作定格"
+        if body_tension in ("", "N/A"):
+            if any(kw in freeze_action for kw in ["呼吸", "胸", "肩"]):
+                body_tension = "胸腔与肩颈承压"
+            elif any(kw in freeze_action for kw in ["步伐", "腿", "前倾"]):
+                body_tension = "下肢与脊背持续发力"
+            else:
+                body_tension = "N/A"
+        if energy_state in ("", "N/A"):
+            if any(kw in (beat.get("emotion", "") + beat.get("content", "") + freeze_action) for kw in ["疲惫", "负荷", "喘", "耗尽"]):
+                energy_state = "耗尽"
+            elif any(kw in (beat.get("emotion", "") + beat.get("content", "") + freeze_action) for kw in ["释然", "轻盈", "宁静"]):
+                energy_state = "释然"
+            elif any(kw in (beat.get("emotion", "") + beat.get("content", "") + freeze_action) for kw in ["稳定", "平稳", "日常"]):
+                energy_state = "稳定"
+            else:
+                energy_state = "压抑" if beat.get("emotion_intensity", 0) and beat.get("emotion_intensity", 0) >= 7 else "稳定"
+
+        narrative_blob = beat.get("narrative_function", "") + beat.get("emotion", "") + beat.get("content", "") + beat.get("visual_hint", "")
+        if any(kw in narrative_blob for kw in ["疲惫", "负荷", "翻山", "汗水"]):
+            visual_task = "强调身体负荷与征服留下的疲惫痕迹"
+            frame_priority = "body_state"
+        elif any(kw in narrative_blob for kw in ["释然", "清晨", "渐行渐远", "终点"]):
+            visual_task = "强调释然后的轻盈与空间开阔感"
+            frame_priority = "emotion_pressure"
+        elif any(kw in narrative_blob for kw in ["奖牌", "书架", "纹理", "触碰"]):
+            visual_task = "强调物件纹理与记忆触发的关系"
+            frame_priority = "movement_shape"
+        else:
+            visual_task = "强调当前叙事节点最关键的人物与空间信息"
+            frame_priority = "character_identity"
+
+        color_desc = csbeat.get("dominant_color", "")
+        video_lines = [
+            f"{aspect_ratio}，横屏。",
+            f"镜头：{shot_type}，运镜方式：{cam_move}。",
+        ]
+        if role_ref:
+            video_lines.append(f"角色：{role_ref}。")
+        if visual_hint:
+            video_lines.append(f"画面内容：{visual_hint}。")
+        if perf:
+            video_lines.append(f"人物动作：{perf}。")
+        if freeze_action and freeze_action != "无明确动作定格":
+            video_lines.append(f"动作定格：{freeze_action}。")
+        if visual_task:
+            video_lines.append(f"视觉任务：{visual_task}。")
+        if lighting:
+            video_lines.append(f"光线：{lighting}。")
+        if color_desc:
+            video_lines.append(f"整体画面色调：{color_desc}。")
+        video_prompt = "\n".join(video_lines)
         
         panels.append({
             "panel_id": f"P{i+1:02d}",
@@ -734,12 +763,19 @@ def assemble_panels(project_dir):
             "performance_notes": act.get("performance_notes", ""),
             "emotional_subtext": act.get("emotional_subtext", ""),
             "performance_directive": act.get("performance_directive", ""),
+            "freeze_action": freeze_action,
+            "body_tension": body_tension,
+            "energy_state": energy_state,
+            "visual_task": visual_task,
+            "frame_priority": frame_priority,
             "facial_expression": act.get("facial_expression", "N/A"),
             "body_language": act.get("body_language", "N/A"),
             "dominant_color": csbeat.get("dominant_color", ""),
             "color_narrative": csbeat.get("narrative_function", ""),
-            "characters": [],
-            "character_prompts": [],
+            "characters": panel_char_names,
+            "character_prompts": panel_char_prompts,
+            "character_appearances": panel_char_appearances,
+            "appearance_refs": appearance_refs,
             "video_prompt": video_prompt,
             "key_visual_moment": beat.get("key_visual_moment", False),
             "directors_note": "",
@@ -760,22 +796,28 @@ def phase5_output(project_dir):
 def patch_beats(project_dir, instruction, model="glm51"):
     """
     根据导演指令局部修改 beats。
-    instruction 格式如：'B05+B06 merged' / 'B03 duration→8s' / 'B07 add key_visual=true'
+    instruction 格式如：'B05+B06 merged' / 'B03 duration→8s' / 'B07 key_visual=true'
     """
     beats = load_json(Path(project_dir) / "story_beats.json")
     intent = load_json(Path(project_dir) / "director_intent.json")
     
-    system = "你是专业分镜规划师。用户要求局部修改Beat方案。请直接修改JSON中的相关字段，只返回修改后的story_beats.json完整内容。"
-    user = f"""当前 story_beats.json:
-{json.dumps(beats, ensure_ascii=False, indent=2)}
-
-导演修改指令: {instruction}
-
-请直接输出修改后的完整JSON（不要解释，只返回JSON）。"""
+    # 验证：beats 数组必须非空
+    patch_validation = {"type": "object", "key": "beats", "min_items": 1}
+    patched = run_llm("patch_beats.md", {
+        "instruction": instruction,
+        "story_beats": beats,
+        "director_intent": intent
+    }, model=model, validation=patch_validation, max_retries=3)
     
-    patched = run_llm("beat_analysis.md", {"instruction": instruction, "story_beats": beats, "director_intent": intent}, model=model)
     save_json(Path(project_dir) / "story_beats.json", patched)
+    
+    # 重新组装 panels（因为 beats 可能变了）
+    panels = assemble_panels(project_dir)
+    save_json(Path(project_dir) / "panels.json", panels)
+    
     generate_beats_viewer(project_dir)
+    generate_storyboard_viewer(project_dir)
+    print(f"✅ patch 完成: {instruction}")
     return patched
 
 # ─── 主入口 ──────────────────────────────────────────────

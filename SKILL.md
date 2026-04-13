@@ -376,7 +376,10 @@ projects/{story-name}/
 
 | 功能 | 说明 |
 |------|------|
-| 批注层 | 每帧可输入导演批注（存储到 panels.json） |
+| 批注层 | 每帧可输入导演批注（存储到 `panel_notes.json`） |
+| 版本快照 | 可保存多个版本快照（存储到 `viewer_versions.json`） |
+| 后端 API | fetch 调用 `http://localhost:8080` 的 REST API |
+| 导出 | 可导出批注 JSON 和版本对比 |
 | 版本记录 | 保留历史版本快照（供对比） |
 | 角色卡悬浮 | 鼠标悬停角色名显示角色卡 |
 | Color Script 可视化 | 色彩情绪曲线可折叠展示 |
@@ -389,14 +392,22 @@ projects/{story-name}/
 ```bash
 cd ~/.openclaw/workspace/skills/director-storyboard/scripts
 
-# 全流程（带意图问卷）
-python3 pipeline.py full --story /path/to/story.txt
+# 1. 启动批注后端（另一个终端，或 & 后台运行）
+python3 viewer_server.py --port 8080
 
-# 指定 Phase 重跑（保留其他 Phase 结果）
-python3 pipeline.py 4 --project projects/xxx   # 重跑 Phase 4（Color Script + 摄影 + 分镜）
-python3 pipeline.py 4e --project projects/xxx # 仅重跑关键帧生成
+# 2. 全流程（带 Gate 确认）
+python3 pipeline.py full --story /path/to/story.txt --project projects/xxx --model glm51
 
-# 查看进度
+# 3. Gate 确认后继续（导演确认后执行）
+python3 pipeline.py full --project projects/xxx --model glm51 --confirm
+
+# 4. 指定 Phase 重跑（保留其他 Phase 结果）
+python3 pipeline.py 4 --project projects/xxx   # 重跑 Phase 4
+
+# 5. 局部修改（导演说"把 B05+B06 合并"时）
+python3 pipeline.py patch --project projects/xxx --patch "B05+B06 merged"
+
+# 6. 查看进度
 python3 pipeline.py status --project projects/xxx
 ```
 
@@ -404,27 +415,147 @@ python3 pipeline.py status --project projects/xxx
 
 | 参数 | 模型 | 适用 Phase |
 |------|------|-----------|
-| `--model glm51` | GLM-5.1 | 所有 LLM 调用（推荐） |
-| `--model kimi25` | Kimi K2.5 | 备选 |
-| `--model gemma4` | Gemma 4 26B | 本地免费，质量略低 |
+| `--model glm51` | GLM-5.1 | 所有 LLM 调用（推荐，duration_target 服从度高） |
+| `--model kimi25` | Kimi K2.5 | 备选，长上下文 |
+| `--model gemma4` | Gemma 4 26B | 本地免费，但 duration_target 服从度较低 |
 
 ---
 
 ## 导演决策门操作规范
 
-**每个 Gate 的操作方式**：
+**Gate 是强制暂停点，不是可选项。** 每个 Gate 必须通过飞书与导演完成一次确认对话，才能继续下一 Phase。
 
-1. 当前 Phase 完成后，暂停 pipeline
-2. 生成该 Phase 的预览文件（HTML 或结构化摘要）
-3. 通过飞书发送给导演
-4. 导演确认或提出修改意见
-5. 修改完成后，pipeline 继续
+### Gate 协调标准流程（Agent 操作步骤）
 
-**Gate 确认才算完成，否则不得进入下一 Phase**
+| 步骤 | 操作 | 工具 |
+|------|------|------|
+| 1 | 运行 pipeline 直到 Gate 触发（pipeline 打印消息并退出） | `exec` |
+| 2 | 读取 Gate 状态文件（`.gate_*.json`）获取待审核内容 | `read` |
+| 3 | 发送飞书卡片给导演，列出审核内容 + 操作按钮 | `message` |
+| 4 | 等待导演在飞书中回复（确认/修改/重新生成） | —（等待下一条消息） |
+| 5 | 根据导演回复，调用 pipeline：`--confirm` 继续 / `--patch` 局部修改 | `exec` |
+| 6 | 重复 2-5 直到导演确认 | |
 
-**修改循环**：每次修改完成后重新发送确认，循环直到导演说"确认"或"可以了"
+### Gate 文件
+
+每个 Gate 会在项目目录生成状态文件：
+```
+.gate_gate_0.json   ← Gate 0 (Story DNA + Beats)
+.gate_gate_1.json   ← Gate 1 (角色档案)
+.gate_gate_2.json   ← Gate 2 (Color Script + 分镜)
+```
+
+文件内容：
+```json
+{
+  "gate_name": "Gate 0",
+  "status": "waiting",
+  "preview_file": "beats-viewer.html",
+  "options": [
+    {"label": "✅ 确认，进入下一步", "value": "confirm"},
+    {"label": "🔄 局部修改 Beat", "value": "modify"},
+    {"label": "🔄 重新生成 Story DNA", "value": "regen_dna"}
+  ]
+}
+```
+
+### 飞书确认卡片格式
+
+在飞书中发送结构化消息：
+```
+🎬 [Gate X] 需要你的确认
+
+项目：xxx
+审核内容：[描述预览文件内容]
+
+请选择：
+✅ 确认，进入下一步
+🔄 局部修改（请说明哪个 Beat/角色）
+🔄 重新生成（指定 Phase）
+```
+
+### 局部修改指令
+
+导演说"修改 B05 和 B06" → Agent 调用：
+```bash
+python3 pipeline.py patch --project xxx --model glm51 --patch "B05+B06 merged"
+```
+
+修改后会自动重新组装 `panels.json` 并生成新的 `viewer.html`。
+
+### Gate 确认才算完成
+
+**修改循环**：每次修改完成后重新发送确认，循环直到导演说"确认"或"可以了"。
+
+### 完整的 Gate 处理循环（Agent 标准操作）
+
+当 pipeline 触发 Gate 0/1/2/3 时，Agent 的标准处理流程：
+
+**Step 1** — 运行 pipeline 直到 Gate 触发：
+```
+exec: python3 pipeline.py full --project projects/xxx --model glm51
+```
+pipeline 会打印类似 `⏸ Gate 0 等待确认，查看 .gate_gate_0.json` 并以非零退出码退出。
+
+**Step 2** — Agent 读取 Gate 状态文件，决定要审核的内容：
+```
+read: .gate_gate_0.json
+```
+
+**Step 3** — Agent 在飞书发送确认卡片（用 message 工具）：
+- 选项 A（确认）：`✅ 确认，进入下一步`
+- 选项 B（局部修改）：`🔄 局部修改（说明具体改什么）`
+- 选项 C（重跑）：`🔄 重新生成（说明哪个 Phase）`
+
+**Step 4** — Agent 告知用户"等待你的确认"，然后等待用户下一条消息。
+
+**Step 5** — 用户回复后，Agent 根据选项执行：
+- 选项 A → `python3 pipeline.py full --project xxx --confirm`
+- 选项 B → `python3 pipeline.py patch --project xxx --patch "B05+B06 merged"` + 发飞书确认
+- 选项 C → `python3 pipeline.py 2 --project xxx`（重跑指定 Phase）+ 发飞书确认
+
+**Step 6** — 重复 Step 2-5 直到用户确认。
+
+**重要**：Gate 是强制暂停点。在用户确认之前，pipeline 不得自动进入下一个 Phase。
 
 ---
+
+## 导演工作台后端（viewer_server.py）
+
+viewer.html 的批注和版本功能需要后端服务器支持。
+
+### 启动后端
+
+```bash
+cd ~/.openclaw/workspace/skills/director-storyboard
+python3 scripts/viewer_server.py --port 8080
+```
+
+### 访问工作台
+
+- 项目列表：http://localhost:8080/
+- 单个项目工作台：http://localhost:8080/viewer/项目名
+
+### 后端 API
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/notes?project=xxx` | GET | 获取所有批注 |
+| `/api/notes?project=xxx` | POST | 保存批注 `{notes: {P01: [{text, author}]}}` |
+| `/api/versions?project=xxx` | GET | 获取版本列表 |
+| `/api/version?project=xxx` | POST | 保存快照 `{label: "版本标签"}` |
+| `/api/version/{id}?project=xxx` | GET | 获取指定版本内容 |
+
+### 批注持久化工作流
+
+1. 启动 `viewer_server.py`
+2. pipeline 生成 `viewer.html`（包含后端 fetch 调用）
+3. 在浏览器打开 viewer.html
+4. 输入批注 → 点击"💾 保存" → 数据存入 `panel_notes.json`
+5. 点击"📸 保存快照" → 版本存入 `viewer_versions.json`
+
+---
+
 
 ## 质量自检清单
 

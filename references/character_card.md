@@ -82,8 +82,8 @@
       "suggested_colors": ["深灰", "藏蓝"],
       "primary_identifier": "眼镜边框的反光——在任何场景中，只要看到这个细节就知道是他",
       "expected_appearances": [
-        {"id": 0, "change_reason": "日常形象"},
-        {"id": 1, "change_reason": "解聘场景", "visual_note": "领带略松，暗示控制感的松动"}
+        {"appearance_id": 0, "beat_id": "BXX", "change_reason": "日常形象"},
+        {"appearance_id": 1, "beat_id": "BXX", "change_reason": "解聘场景", "visual_note": "领带略松，暗示控制感的松动"}
       ]
     }
   ]
