@@ -1332,7 +1332,7 @@ def main():
     parser.add_argument("phase", nargs="?", choices=["0","1","2","3","4","5","full","lookdev","patch"], help="Phase")
     parser.add_argument("--project", required=True)
     parser.add_argument("--story", help="Path to story.txt (phase 0)")
-    parser.add_argument("--model", choices=["glm51","kimi25","gemma4"], help="必须显式指定模型")
+    parser.add_argument("--model", choices=["glm51","kimi25","gemma4","minimax"], help="必须显式指定模型")
     parser.add_argument("--confirm", action="store_true", help="Bypass gate waiting, assume confirmed")
     parser.add_argument("--patch", help="Partial modification instruction (e.g. 'B05+B06 merged')")
     parser.add_argument("--resume", action="store_true", help="Resume from completed checkpoints")
@@ -1412,9 +1412,10 @@ def main():
             print("⏭ 跳过 Phase 5 Output")
 
         state = load_run_state(project_dir)
-        state["overall_status"] = "done"
+        state["overall_status"] = "completed"
         state["current_step"] = "phase5_output"
         save_run_state(project_dir, state)
+        print_run_state_summary(project_dir)
         print("🎉 全流程完成!")
         return
 

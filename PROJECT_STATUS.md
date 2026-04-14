@@ -678,3 +678,20 @@ skill 后续需要支持至少两种模式：
 ## 一句话 handoff
 
 `director-storyboard` 已完成链路修复、年龄泛化修正、viewer 刷新闭环和 panel 决策层升级；`director-storyboard` 已完成从本地关键词分类器到“镜头主导权判断器”的第一阶段重构；当前最关键的下一步，是扩大验证样本，并继续校准 `event_interruption / emotion_pressure / movement_shape` 的边界。
+
+
+## 2026-04-14 回归验证补充
+
+### 已完成验证
+- clean-run：使用 `/tmp/openclaw/ds-regression/clean-run-v1` 从空白项目完整跑通至 `phase5_output`
+- interrupted resume：已验证 `running` 残留状态可被 reconcile，并在 `--resume` 下正确恢复
+- restart-from：已验证 `--restart-from phase4c_photography` 可正确从指定阶段继续执行
+
+### 本轮修复
+- `overall_status` 结束态统一为 `completed`，不再混用 `done`
+- `pipeline.py` 的 `--model` 白名单加入 `minimax`
+- minimax 实跑通过 full clean-run，全链路闭环成立
+
+### 当前结论
+- checkpoint / resume / restart-from 已从“功能实现”进入“回归验证通过”状态
+- clean-run + 中断恢复 + restart-from 三条主链均已验证通过

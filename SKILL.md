@@ -168,6 +168,19 @@ resume 不是只看一个状态文件，而是综合判断：
 - resume 的目标是“最小必要重跑”，不是承诺绝对零重跑
 - 若想强制从某步开始，以 `--restart-from` 为准
 
+### 回归验证状态（2026-04-14）
+
+以下三条链路已完成实测：
+
+- clean-run：从空白项目完整跑通到 `phase5_output`
+- interrupted resume：中断/残留 `running` 状态后可恢复
+- restart-from：从指定 step 开始重跑可用
+
+补充说明：
+
+- `minimax` 已加入 `pipeline.py` 的 `--model` 可选项，并完成过 full clean-run 验证
+- `overall_status` 的最终完成态统一为 `completed`
+
 ---
 
 ## Phase 0 · 导演意图捕获
