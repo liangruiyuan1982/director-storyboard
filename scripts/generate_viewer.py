@@ -6,8 +6,19 @@ from datetime import datetime
 
 BACKEND_URL = "http://localhost:8080"
 
+def resolve_project_dir(project_dir):
+    path = Path(project_dir)
+    if path.exists():
+        return path.resolve()
+    candidate = Path(__file__).parent.parent / "projects" / str(project_dir)
+    if candidate.exists():
+        return candidate.resolve()
+    return path
+
+
 def generate_viewer_html(project_dir):
     """生成完整的 viewer.html，包含真实后端调用"""
+    project_dir = resolve_project_dir(project_dir)
     project_name = Path(project_dir).name
     
     panels = []
@@ -541,14 +552,14 @@ init();
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("用法: python3 generate_viewer.py <project_name>")
+        print("用法: python3 generate_viewer.py <project_name|project_dir>")
         sys.exit(1)
-    project_name = sys.argv[1]
-    project_dir = Path(__file__).parent.parent / "projects" / project_name
+    arg = sys.argv[1]
+    project_dir = resolve_project_dir(arg)
     if not project_dir.exists():
         print(f"❌ 项目不存在: {project_dir}")
         sys.exit(1)
-    
+
     html = generate_viewer_html(project_dir)
     out = project_dir / "viewer.html"
     with open(out, "w", encoding="utf-8") as f:

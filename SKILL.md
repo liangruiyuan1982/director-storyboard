@@ -71,8 +71,102 @@ projects/{story-name}/
 ├── acting.json                  # Phase 4c 输出（表演指令）
 ├── panels.json                  # Phase 4d 输出（分镜组装+关键帧）
 ├── viewer.html                  # Phase 5 输出（分镜看板）
-└── pipeline_progress.json       # 断点续跑状态
+└── run_state.json               # 断点续跑状态（resume / restart-from 的核心状态文件）
 ```
+
+---
+
+## 断点续跑（Resume）与阶段重跑
+
+### 现在支持什么
+
+这个 skill 现在已经支持稳定的断点续跑能力，核心行为如下：
+
+- `pipeline.py` 支持 `--resume`
+- `pipeline.py` 支持 `--restart-from <step>`
+- 已完成阶段会自动跳过
+- 失败阶段、被中断阶段、输入指纹变化的阶段会从对应位置继续
+- 旧项目即使没有完整状态文件，也会根据现有输出自动 bootstrap
+- 派生产物不会阻塞核心阶段跳过（如 `beats-viewer.html`、`character-viewer.html`、`panel_intents.json`）
+
+### 当前 step 列表
+
+可用于 `--restart-from` 的 step：
+
+- `phase0_input`
+- `phase1_story_dna`
+- `phase2_beats`
+- `phase3_characters`
+- `phase4a_lookdev`
+- `phase4b_color_script`
+- `phase4c_photography`
+- `phase4d_acting`
+- `phase4e_panels`
+- `phase5_output`
+
+### 常用命令
+
+#### 1. 正常跑完整流程
+
+```bash
+python3 scripts/pipeline.py full --project /abs/path/to/project --model glm51 --confirm
+```
+
+#### 2. 从断点继续
+
+```bash
+python3 scripts/pipeline.py full --project /abs/path/to/project --model glm51 --resume --confirm
+```
+
+#### 3. 从指定阶段重跑
+
+```bash
+python3 scripts/pipeline.py full --project /abs/path/to/project --model glm51 --restart-from phase4c_photography --confirm
+```
+
+### Resume 的判断依据
+
+resume 不是只看一个状态文件，而是综合判断：
+
+- `run_state.json` / 阶段状态
+- 核心输出文件是否存在
+- 输出结构是否有效（JSON key 是否符合预期）
+- 输入文件指纹是否变化
+- Gate 审核状态是否已通过
+
+### 什么会触发重跑
+
+以下情况会让某一步不 skip：
+
+- 该阶段状态不是 `done`
+- 核心输出缺失
+- 输出结构无效
+- 输入指纹变化
+- 该阶段需要审核，但审核未通过
+
+### 什么不会阻塞 skip
+
+以下文件属于派生产物，不作为核心跳过条件：
+
+- `beats-viewer.html`
+- `character-viewer.html`
+- `panel_intents.json`
+
+也就是说，旧项目即使缺这些文件，只要核心 JSON 产物完整且有效，仍然可以 resume。
+
+### 重启/中断后的行为
+
+如果电脑重启、进程被杀、任务中断：
+
+- 上次停在 `running` 的阶段会在下次启动时被视为中断残留
+- 系统会自动把它修正为可恢复状态
+- 下次 `--resume` 时，从真实未完成/失败/变更点继续
+
+### 当前边界
+
+- `phase5_output` 目前保持偏保守策略，必要时可能会因指纹变化重生成 viewer
+- resume 的目标是“最小必要重跑”，不是承诺绝对零重跑
+- 若想强制从某步开始，以 `--restart-from` 为准
 
 ---
 

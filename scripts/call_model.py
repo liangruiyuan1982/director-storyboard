@@ -9,10 +9,32 @@ import json
 import argparse
 import time
 import re
+import subprocess
+from pathlib import Path
 
 # 添加 ai-storyboard-pro 的 scripts 目录到路径
 sys.path.insert(0, "/Users/liangruiyuan/.openclaw/workspace/skills/ai-storyboard-pro/scripts")
 from api import call_api
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CODEX_RUNNER = SCRIPT_DIR / "call_model_codex.mjs"
+
+
+def call_codex(model, system, prompt):
+    payload = json.dumps({
+        "modelRef": model,
+        "systemPrompt": system,
+        "userPrompt": prompt,
+    }, ensure_ascii=False)
+    proc = subprocess.run(
+        ["node", str(CODEX_RUNNER)],
+        input=payload,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"Codex 调用失败: {proc.stderr[:500]}")
+    return proc.stdout
 
 MAX_RETRIES = 3
 
@@ -52,24 +74,75 @@ def is_truncated(text):
     return False
 
 
+def robust_parse(text):
+    """更强的 JSON 容错解析"""
+    c = text
+    c = re.sub(r'```\w*', '', c)
+    c = re.sub(r'<[^>]+>', '', c)
+    c = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', c)
+    c = c.replace("\u00ab", '"').replace("\u00bb", '"')
+    c = c.replace("\u201c", "\u300c").replace("\u201d", "\u300d")
+    c = re.sub(r'\}\n\s*\}', '}', c)
+    c = re.sub(r'"\w+_,\s*("(?:panel_id|beat_id|performance_notes|body_language|facial_expression|lighting|depth_of_field|color_temperature|camera_movement|shot_type|duration|voiceover|transition|description|source_text|mood|appearance|scene_type|freeze_action|body_tension|energy_state)")', r'\1', c)
+    c = re.sub(r'\n\s*_\w+":\s*"[^"]*"', '', c)
+    c = re.sub(r',\s*,', ',', c)
+    try:
+        return json.loads(c)
+    except Exception:
+        pass
+    c = re.sub(r'"_([^_]+)_"', r'"\1"', c)
+    c = re.sub(r',\s*,', ',', c)
+    c = re.sub(r',\s*([}\]])', r'\1', c)
+    c = re.sub(r'""([,}\]])', r'"\1', c)
+    c = re.sub(r'([\{\[,\n]\s*)([a-zA-Z_][a-zA-Z0-9_]*)":', r'\1"\2":', c)
+    c = re.sub(r'\s+_([a-zA-Z][a-zA-Z0-9_]*)\s*:', r' "\1":', c)
+    c = re.sub(r':\s+(?![\[{"\'\-\d])([A-Za-z_][A-Za-z0-9_]*)\s*([,}\]])', lambda m: f': "{m.group(1)}"{m.group(2)}' if m.group(1) not in ('true','false','null') else f': {m.group(1)}{m.group(2)}', c)
+    try:
+        return json.loads(c)
+    except Exception:
+        pass
+    def _extract_balanced(src, open_ch, close_ch):
+        depth = 0
+        start = -1
+        for i, ch in enumerate(src):
+            if ch == open_ch:
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == close_ch:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    return src[start:i+1]
+        return None
+    for open_ch, close_ch in [('{','}'), ('[',']')]:
+        block = _extract_balanced(c, open_ch, close_ch)
+        if block:
+            try:
+                return json.loads(block)
+            except Exception:
+                pass
+    last = max(c.rfind('}'), c.rfind(']'))
+    if last > 0:
+        try:
+            return json.loads(c[:last+1])
+        except Exception:
+            pass
+    raise ValueError("Cannot parse JSON from output")
+
+
 def extract_json(text):
     """从 LLM 输出中提取 JSON"""
-    # 1. 先尝试直接解析
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    
-    # 2. 再尝试提取 ```json ... ```
     m = re.search(r'```json\s*([\s\S]+?)\s*```', text)
     if m:
         fenced = m.group(1)
         try:
             return json.loads(fenced)
         except json.JSONDecodeError:
-            text = fenced  # 继续对 fenced 内容做后续处理
-    
-    # 3. 再尝试找第一个 { 或 [ 包裹的完整 JSON
+            text = fenced
     for start_char in ['{', '[']:
         idx = text.find(start_char)
         if idx < 0:
@@ -90,11 +163,12 @@ def extract_json(text):
                 return json.loads(text[idx:end_idx])
             except json.JSONDecodeError:
                 continue
-    
-    # 4. 最后才做截断检测
+    try:
+        return robust_parse(text)
+    except Exception:
+        pass
     if is_truncated(text):
         raise ValueError("JSON被截断，模型在token限制处停止")
-    
     raise ValueError(f"无法解析 JSON，原始内容前200字: {text[:200]}")
 
 
@@ -144,13 +218,17 @@ def call_with_retry(model, system, prompt, validation=None, max_retries=MAX_RETR
         output_file = "/tmp/llm_output.json"
     
     for attempt in range(max_retries):
-        result = call_api(model, system, prompt, max_tokens=max_tokens)
-        text = result[0] if isinstance(result, tuple) else (result.content if hasattr(result, 'content') else str(result))
+        finish_reason = None
+        if model in ("gpt5.4", "openai-codex/gpt-5.4"):
+            text = call_codex("openai-codex/gpt-5.4", system, prompt)
+            result = text
+        else:
+            result = call_api(model, system, prompt, max_tokens=max_tokens)
+            text = result[0] if isinstance(result, tuple) else (result.content if hasattr(result, 'content') else str(result))
         
         try:
             data = extract_json(text)
         except ValueError as e:
-            finish_reason = None
             if isinstance(result, tuple) and len(result) >= 3 and isinstance(result[2], dict):
                 finish_reason = result[2].get("finish_reason")
             debug_path = f"/tmp/llm_debug_{model}_attempt{attempt+1}.txt"

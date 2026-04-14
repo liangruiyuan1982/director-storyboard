@@ -20,7 +20,8 @@
 - [ ] 高潮 beat 的 duration_estimate 高于周围 beat
 
 ### 叙事审核
-- [ ] voiceover 不是 content 的逐字复制
+- [ ] `q5b_voiceover_rewrite = adapt` 时，voiceover 不是 content 的机械逐字复制
+- [ ] `q5b_voiceover_rewrite = preserve_original` 时，voiceover 可追溯到用户原文，且未被改写
 - [ ] narrative_function 与 story_dna.json 一致
 - [ ] key_visual_moments 被正确标记
 
