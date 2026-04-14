@@ -21,7 +21,10 @@ import base64
 from datetime import datetime
 from pathlib import Path
 
-PROJECT_BASE = Path("/Users/liangruiyuan/.openclaw/workspace/skills/director-storyboard/projects")
+from path_config import PROJECTS_DIR as PROJECT_BASE
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_DIR = SCRIPT_DIR.parent
 JIMENG_API = "http://127.0.0.1:8000"
 
 def load_json(path):
@@ -70,14 +73,16 @@ def jimeng_generate(prompt, ref_image_b64=None, ratio="16:9", model="jimeng-5.0"
                 images.append(item["url"])
     return images
 
-def jimeng_video(prompt, ref_image_url=None, duration=5, save_name=None):
+def jimeng_video(prompt, ref_image_url=None, ref_image_b64=None, duration=5, save_name=None):
     """调用即梦视频生成 API"""
     payload = {
         "model": "jimeng-4.0",
         "prompt": prompt,
         "duration": duration,
     }
-    if ref_image_url:
+    if ref_image_b64:
+        payload["images"] = [f"data:image/jpeg;base64,{ref_image_b64}"]
+    elif ref_image_url:
         payload["image_url"] = ref_image_url
     if save_name:
         payload["save_name"] = save_name

@@ -14,10 +14,9 @@ from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-import threading
 
-SKILL_DIR = Path(__file__).parent.parent
-PROJECTS_DIR = SKILL_DIR / "projects"
+from path_config import SKILL_DIR, PROJECTS_DIR
+
 PORT = 8080
 
 # ─── Annotation & Version Backend ───────────────────────────────

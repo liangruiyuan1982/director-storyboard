@@ -18,7 +18,7 @@ description: 专业导演分镜系统。以导演创作意图为核心，5-phase
 | 维度 | ai-storyboard-pro | director-storyboard（这个工具） |
 |------|------------------|-------------------------------|
 | 起点 | 故事文本 | 导演意图 + 故事文本 |
-| 流程 | 6步线性，无决策门 | 5 Phase + 4 个导演决策门 |
+| 流程 | 6步线性，无决策门 | 5 Phase + 3 个导演决策门 |
 | voiceover | 代码复制 content | LLM 基于叙事视角重新生成 |
 | 色彩 | 无 | 独立 Color Script 环节 |
 | viewer | 分镜展示 | 导演工作台（批注+版本+导出） |
@@ -27,39 +27,39 @@ description: 专业导演分镜系统。以导演创作意图为核心，5-phase
 
 ---
 
-## 5 Phase + 4 Gate 流程总览
+## 5 Phase + 3 Gate 流程总览
 
 ```
 Phase 0 · 导演意图捕获
   用户输入 story.txt → 完成意图问卷 → 两者结合输入后续流程
-        ↓ [Gate 0: 意图确认]
 
 Phase 1 · Story DNA 分析
   结构诊断（三幕坐标 + 叙事功能 + 情绪曲线 + 信息流）
-        ↓ [Gate 1: 结构确认]
 
 Phase 2 · Beat 可视化规划
-  叙事功能标注 + visual_hint 生成（含景别/光影/色调）
-        ↓ [Gate 2: Beat 方案确认]
+  叙事功能标注 + visual_hint 生成
+        ↓ [Gate 0: Beat 方案确认]
 
-Phase 3 · 角色 + 场景设计
-  角色卡（外观+视觉叙事功能）+ 场景视觉基调
-        ↓ [Gate 3: 视觉方向确认]
+Phase 3 · 角色设计
+  角色卡 + 角色视觉描述
+        ↓ [Gate 1: 角色方向确认]
 
-Phase 4 · 摄影 + 表演 + 分镜合成
-  Color Script + Photography + Acting + 分镜组装 + 关键帧
-        ↓ [Gate 4: 图像确认]
+Phase 4 · Lookdev + Color Script + Photography + Acting + 分镜合成
+  含 panel_intent 判断、panels 组装、viewer 生成
+        ↓ [Gate 2: 分镜确认]
 
 Phase 5 · 成片输出
-  分镜看板（HTML）+ 拍摄参数表 + Color Script 文档
+  viewer.html / panel_notes.json / viewer_versions.json 等导演工作台产物
 ```
 
 ---
 
 ## 项目目录结构
 
+默认项目数据目录建议放在 skill 外部，避免污染 skill 包本体：
+
 ```
-projects/{story-name}/
+~/.openclaw/workspace/skill-data/director-storyboard/projects/{story-name}/
 ├── story.txt                    # 原始故事文本
 ├── director_intent.json         # Phase 0 输出（意图问卷答案）
 ├── story_dna.json               # Phase 1 输出（结构分析）
@@ -73,6 +73,32 @@ projects/{story-name}/
 ├── viewer.html                  # Phase 5 输出（分镜看板）
 └── run_state.json               # 断点续跑状态（resume / restart-from 的核心状态文件）
 ```
+
+兼容说明：若外部目录不存在，脚本仍会回退使用 skill 目录内的 `projects/`。
+
+---
+
+## Codex 订阅测试状态（2026-04-15）
+
+当前已保留实验性 Codex 测试入口：
+
+- `scripts/codex_runner.py`
+- `scripts/codex_backend_infer.py`
+- `scripts/codex_backend_direct.py`
+
+但它们目前**仅供实验/诊断，不属于正式 pipeline 能力**。
+
+当前结论：
+
+- `direct backend` 路径在现有 `pi-ai` provider 实现下仍依赖 API key，不能低成本复用当前 Codex 订阅态授权
+- `infer backend` 虽然理论上可走订阅态，但实测会受到 OpenClaw 主会话锁竞争影响，最小调用也可能卡住
+- 因此当前 Codex runner **不得作为正式生产入口**，也**不要默认接入 `pipeline.py` 主链**
+
+推荐定位：
+
+- 作为后续研究入口保留
+- 仅用于人工对照测试或专项诊断
+- 当前正式产线仍以已验证稳定的模型链路为准
 
 ---
 
@@ -499,32 +525,52 @@ resume 不是只看一个状态文件，而是综合判断：
 ```bash
 cd ~/.openclaw/workspace/skills/director-storyboard/scripts
 
-# 1. 启动批注后端（另一个终端，或 & 后台运行）
+# 1. 启动批注后端（另一个终端，或后台）
 python3 viewer_server.py --port 8080
 
-# 2. 全流程（带 Gate 确认）
-python3 pipeline.py full --story /path/to/story.txt --project projects/xxx --model glm51
+# 2. 全流程
+python3 pipeline.py full --story /path/to/story.txt --project marathon-original-vo-test --model glm51 --confirm
 
-# 3. Gate 确认后继续（导演确认后执行）
-python3 pipeline.py full --project projects/xxx --model glm51 --confirm
+# 3. 从断点继续
+python3 pipeline.py full --project marathon-original-vo-test --model minimax --resume --confirm
 
-# 4. 指定 Phase 重跑（保留其他 Phase 结果）
-python3 pipeline.py 4 --project projects/xxx   # 重跑 Phase 4
+# 4. 从指定 step 重跑
+python3 pipeline.py full --project marathon-original-vo-test --model minimax --restart-from phase4c_photography --resume --confirm
 
-# 5. 局部修改（导演说"把 B05+B06 合并"时）
-python3 pipeline.py patch --project projects/xxx --patch "B05+B06 merged"
+# 5. 单独重跑 Phase 4
+python3 pipeline.py 4 --project marathon-original-vo-test --model glm51 --resume
 
-# 6. 查看进度
-python3 pipeline.py status --project projects/xxx
+# 6. 局部修改
+python3 pipeline.py patch --project marathon-original-vo-test --model glm51 --patch "B05+B06 merged"
+
+# 7. 轻量结构回归
+python3 regression_structure.py marathon-original-vo-test
+
+# 8. 最小单测
+python3 test_minimal.py
+
+# 9. restart-from 状态测试
+python3 test_restart_state.py
+
+# 10. Codex 订阅专用测试（不走 api.py）
+python3 test_codex_subscription.py marathon-original-vo-test phase2
+
+# 11. 轻量烟雾回归
+python3 smoke_matrix.py marathon-original-vo-test minimax light
+
+# 12. 重型烟雾回归（可能触发远端模型链路）
+python3 smoke_matrix.py marathon-original-vo-test minimax heavy
 ```
 
 ### 模型配置
 
-| 参数 | 模型 | 适用 Phase |
-|------|------|-----------|
-| `--model glm51` | GLM-5.1 | 所有 LLM 调用（推荐，duration_target 服从度高） |
-| `--model kimi25` | Kimi K2.5 | 备选，长上下文 |
-| `--model gemma4` | Gemma 4 26B | 本地免费，但 duration_target 服从度较低 |
+| 参数 | 模型 | 说明 |
+|------|------|------|
+| `--model glm51` | GLM-5.1 | 默认主力模型 |
+| `--model kimi25` | Kimi K2.5 | 长上下文备选 |
+| `--model gemma4` | Gemma 4 26B | 本地/低成本备选 |
+| `--model minimax` | MiniMax | 已完成 full clean-run 与 resume 验证 |
+| `gpt5.4` | OpenAI Codex GPT-5.4 | 通过 `test_codex_subscription.py` 走订阅专用测试入口，不依赖 `api.py` |
 
 ---
 
@@ -538,8 +584,8 @@ python3 pipeline.py status --project projects/xxx
 |------|------|------|
 | 1 | 运行 pipeline 直到 Gate 触发（pipeline 打印消息并退出） | `exec` |
 | 2 | 读取 Gate 状态文件（`.gate_*.json`）获取待审核内容 | `read` |
-| 3 | 发送飞书卡片给导演，列出审核内容 + 操作按钮 | `message` |
-| 4 | 等待导演在飞书中回复（确认/修改/重新生成） | —（等待下一条消息） |
+| 3 | 通过外部消息系统或人工确认链路，把 Gate 内容发给导演 | 由宿主 Agent 负责 |
+| 4 | 等待导演回复（确认/修改/重新生成） | —（等待下一条消息） |
 | 5 | 根据导演回复，调用 pipeline：`--confirm` 继续 / `--patch` 局部修改 | `exec` |
 | 6 | 重复 2-5 直到导演确认 | |
 
@@ -547,9 +593,9 @@ python3 pipeline.py status --project projects/xxx
 
 每个 Gate 会在项目目录生成状态文件：
 ```
-.gate_gate_0.json   ← Gate 0 (Story DNA + Beats)
-.gate_gate_1.json   ← Gate 1 (角色档案)
-.gate_gate_2.json   ← Gate 2 (Color Script + 分镜)
+.gate_0.json   ← Gate 0 (Beat 方案)
+.gate_1.json   ← Gate 1 (角色档案)
+.gate_2.json   ← Gate 2 (分镜 / viewer)
 ```
 
 文件内容：
@@ -566,9 +612,9 @@ python3 pipeline.py status --project projects/xxx
 }
 ```
 
-### 飞书确认卡片格式
+### 确认消息格式
 
-在飞书中发送结构化消息：
+通过宿主 Agent 所在的消息系统发送结构化确认消息，例如：
 ```
 🎬 [Gate X] 需要你的确认
 

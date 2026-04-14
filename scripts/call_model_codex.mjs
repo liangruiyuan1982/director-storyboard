@@ -1,4 +1,4 @@
-import { getModel, complete, registerBuiltInApiProviders } from '/Users/liangruiyuan/.openclaw/extensions/lossless-claw/node_modules/@mariozechner/pi-ai/dist/index.js';
+import { getModel, complete, registerBuiltInApiProviders } from '../../../extensions/lossless-claw/node_modules/@mariozechner/pi-ai/dist/index.js';
 
 registerBuiltInApiProviders();
 

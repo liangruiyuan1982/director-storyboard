@@ -4,14 +4,40 @@
 
 - Skill: `director-storyboard`
 - 当前分支: `main`
-- 最近确认提交: `388e6c0` (`feat: upgrade panel decision schema and fix phase4 pipeline`)
-- GitHub 已 push: 是
-- 正式 full pipeline 状态: **已跑通，exit code 0**
-- 最近完整验证时间: 2026-04-13
+- GitHub 开发边界：skill 目录保留 `.git` 仅用于开发维护，不代表最终分发态
+- 正式 full pipeline 状态: **已跑通，主链 resume 可用，结构回归可用**
+- 当前工程状态: **development-in-progress engineering**
+- 最近本轮重构验证时间: 2026-04-15
+
+## 目录边界说明（2026-04-15）
+
+- skill 本体目录：`~/.openclaw/workspace/skills/director-storyboard`
+- 项目运行数据目录：`~/.openclaw/workspace/skill-data/director-storyboard/projects`
+- 当前脚本已优先使用外部 `skill-data` 目录，避免运行产物继续污染 skill 本体
+- skill 目录内保留 `.git` 仅用于当前开发维护，不应视为最终分发包的一部分
+- `scripts/` 仅保留主链脚本与正式测试入口；一次性诊断/对比/实验脚本已下沉到 `scripts/dev/`
 
 ---
 
 ## 本轮已完成的核心升级
+
+### 0. 工程结构重构（2026-04-15）
+已新增/抽离：
+- `scripts/path_config.py`：路径与项目目录解析
+- `scripts/gates.py`：Gate 状态管理
+- `scripts/state_store.py`：run_state / fingerprint / skip 逻辑
+- `scripts/panel_assembler.py`：panel_intent + panels 组装
+- `scripts/phase_runners.py`：各 phase 执行体
+- `scripts/cli_runner.py`：CLI 参数解析与 full/single-phase 分发
+- `scripts/regression_structure.py`：本地轻量结构回归
+- `scripts/test_minimal.py`：最小单测入口
+- `scripts/test_restart_state.py`：restart-from 状态回归测试
+- `scripts/test_codex_subscription.py`：Codex 订阅专用测试入口（不依赖 `api.py`）
+- `scripts/smoke_matrix.py`：烟雾回归矩阵入口（已区分 light / heavy，失败时分类显示退出类型）
+- `scripts/codex_runner.py` / `scripts/codex_backend_infer.py` / `scripts/codex_backend_direct.py`：Codex 订阅实验入口（仅实验，不进正式主链）
+
+当前 `pipeline.py` 已从“超重实现文件”收缩为“主编排层 + 装配层”。
+
 
 ### 1. Panel 从信息汇总层升级为导演决策层
 新增字段：
@@ -87,7 +113,21 @@ viewer 中可直接查看：
 验证结果：
 - `pipeline.py 4 --project ... --model glm51 --confirm` 成功
 - `scripts/test_full_pipeline.py` 成功，最终 `exit code 0`
+- `regression_structure.py` 已通过（20 panels）
+- `test_minimal.py` 已通过（cli/state/panel 三类最小测试）
+- `test_restart_state.py` 已通过（restart-from 状态回退验证）
+- 已新增 `test_codex_subscription.py`，用于把 Codex 订阅测试从 `test_full_pipeline.py -> api.py` 链路中解耦出来
+- `pipeline.py 5 --project marathon-original-vo-test --model minimax --resume` 已验证正确 skip
 - viewer 已确认在 keyframes 写回后自动刷新
+
+### 6.1 Codex 订阅集成结论（2026-04-15）
+当前已完成专项排查，结论如下：
+
+- `direct backend`：当前 `pi-ai` 的 `openai-codex` provider 路径仍要求显式 API key，不能低成本复用现有 Codex 订阅态授权
+- `infer backend`：理论上可复用订阅态，但在当前环境下实测会受到 OpenClaw 主会话锁竞争影响，最小 prompt 也可能卡住
+- 因此，Codex 相关 runner 和 backend **当前仅保留为实验/诊断入口**
+- **不得默认接入 `pipeline.py` 正式主链**
+- 当前正式产线仍以已经跑通回归的稳定模型链路为准
 
 ### 7. 年龄规则从“硬年龄痕迹”升级为“年龄-状态-生活痕迹”综合判断
 已更新：
@@ -285,7 +325,8 @@ viewer 中可直接查看：
 ### 当前阻塞（更新）
 - beat_analysis 的解析失败并未稳定复现，重跑后已通过
 - 当前已保留调试能力：`test_full_pipeline.py` 的 `call_m()` 会在解析失败时把完整原始响应保存到 `/tmp/test_full_pipeline_debug_<model>_<timestamp>.txt`
-- 该问题仍视为潜在不稳定项，但目前不再阻塞第二阶段验证
+- `smoke_matrix.py` 中重型 case（如 restart-from 触发远端模型链路）仍可能被外部执行环境 `SIGKILL`，当前判断更像资源/宿主中断，不是本轮重构直接造成的逻辑失败
+- 该问题仍视为潜在不稳定项，但目前不再阻塞结构整改
 
 ### 第二阶段最新验证结论
 - `emotion_pressure` 的措辞已明显改善，不再默认滑向“对峙/对抗”

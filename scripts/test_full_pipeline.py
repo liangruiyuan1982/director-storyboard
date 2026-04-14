@@ -3,17 +3,17 @@
 import sys, json, re, os, time, importlib.util
 from pathlib import Path
 
-AI_SCRIPTS = "/Users/liangruiyuan/.openclaw/workspace/skills/ai-storyboard-pro/scripts"
-DS_SCRIPTS = "/Users/liangruiyuan/.openclaw/workspace/skills/director-storyboard/scripts"
-if AI_SCRIPTS not in sys.path:
-    sys.path.insert(0, AI_SCRIPTS)
-if DS_SCRIPTS not in sys.path:
-    sys.path.insert(0, DS_SCRIPTS)
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from path_config import add_ai_storyboard_to_path, PROJECTS_DIR, SKILL_DIR
+add_ai_storyboard_to_path()
 
 from api import call_api
 
 # force director-storyboard's pipeline.py, avoid path collision
-pipeline_path = f"{DS_SCRIPTS}/pipeline.py"
+pipeline_path = str(SCRIPT_DIR / "pipeline.py")
 pipeline_spec = importlib.util.spec_from_file_location("director_storyboard_pipeline_main", pipeline_path)
 pipeline_main = importlib.util.module_from_spec(pipeline_spec)
 pipeline_spec.loader.exec_module(pipeline_main)
@@ -27,16 +27,15 @@ generate_beats_viewer = pipeline_main.generate_beats_viewer
 generate_character_viewer = pipeline_main.generate_character_viewer
 
 # force director-storyboard's call_model.py, avoid path collision
-call_model_path = f"{DS_SCRIPTS}/call_model.py"
+call_model_path = str(SCRIPT_DIR / "call_model.py")
 spec = importlib.util.spec_from_file_location("director_storyboard_call_model", call_model_path)
 call_model_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(call_model_mod)
 extract_json = call_model_mod.extract_json
 
-DEFAULT_PROJECT = "/Users/liangruiyuan/.openclaw/workspace/skills/director-storyboard/projects/test-emotional-monologue"
+DEFAULT_PROJECT = str(PROJECTS_DIR / "test-emotional-monologue")
 DEFAULT_MODEL = "gemma4"
-SKILL_DIR = "/Users/liangruiyuan/.openclaw/workspace/skills/director-storyboard"
-os.chdir(SKILL_DIR)
+os.chdir(str(SKILL_DIR))
 
 PROJECT = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROJECT
 MODEL = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_MODEL
@@ -333,7 +332,7 @@ print(f"\n{'─'*70}")
 print(f"📍 {phase_label('4d')} 分镜组装")
 print(f"{'─'*70}")
 
-pipeline_path = "/Users/liangruiyuan/.openclaw/workspace/skills/director-storyboard/scripts/pipeline.py"
+pipeline_path = str(SCRIPT_DIR / "pipeline.py")
 spec = importlib.util.spec_from_file_location("director_storyboard_pipeline", pipeline_path)
 pipeline_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pipeline_mod)

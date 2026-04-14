@@ -12,11 +12,13 @@ import re
 import subprocess
 from pathlib import Path
 
+from path_config import add_ai_storyboard_to_path
+
 # 添加 ai-storyboard-pro 的 scripts 目录到路径
-sys.path.insert(0, "/Users/liangruiyuan/.openclaw/workspace/skills/ai-storyboard-pro/scripts")
+SCRIPT_DIR = Path(__file__).resolve().parent
+add_ai_storyboard_to_path()
 from api import call_api
 
-SCRIPT_DIR = Path(__file__).resolve().parent
 CODEX_RUNNER = SCRIPT_DIR / "call_model_codex.mjs"
 
 
