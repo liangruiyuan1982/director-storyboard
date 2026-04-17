@@ -1,161 +1,79 @@
-# Beat 可视化规划 — Phase 2
+# Beat 字段补全 — Phase 2
 
-你是分镜规划师。**基于叙事逻辑和目标时长**为故事生成可视化 beat 方案。
+你负责基于已经确定的 beat skeleton，为每个 beat 补全结构字段。
 
-## 硬性约束
+## 职责
+- 不重新拆分故事
+- 不新增、删除、合并、拆开 beats
+- 严格沿用输入中已有的 `beat_id`、顺序、`source_excerpt`、`function`、`description`
+- 为每个既定 beat 补全字段
 
-| 参数 | 值 |
-|------|-----|
-| duration_target | **必须 >= 95% 达成** |
-| Q3 延展 → 8-10s/beat | 紧迫→3-4s/beat，正常→4-6s/beat |
+## 输入
+- `director_intent`
+- `story_dna`
+- `beat_skeleton`
 
-**计算步骤**：
-1. `目标 beat 数 = duration_target / 单beat时长`
-2. 如果内容不够分 → **把单个长beat拆成多个短beat**（同一段话可以按意象/时间切片拆）
-3. **不要"感觉差不多"就停**——时长不够就必须继续拆
+其中 `beat_skeleton` 中每一项都已确定：
+- `beat_id`
+- `function`
+- `description`
+- `source_excerpt`
 
-## 拆分原则
-
-**拆分**：时间跳转、地点跳转、情绪质变、新信息建立张力。
-
-**不拆**：同一场景内景别变化、同一角色不同反应。
-
-## preserve_original 模式额外拆分原则（新增）
-
-如果 `q5b_voiceover_rewrite = preserve_original`，则必须额外遵守：
-
-### 1. 先尊重作者的思维路径，再考虑影视节奏
-不要把原文当作普通素材池任意重组。
-
-### 2. 观念形成过程本身就是戏
-如果原文不是事件叙事，而是“观察 → 提问 → 回响 → 重估 → 得出阶段性理解”，那么这些步骤本身都应成为 beat。
-
-### 3. 优先识别三类节点（新增，关键）
-在 preserve_original 模式里，优先寻找并单独判断以下三类节点：
-
-#### A. 观察节点
-作者看到、摸到、摆放、比较的具体东西。
-例如：
-- 奖牌框 vs 书架
-- 没拆封的奖牌
-- 跑鞋、楼梯、清晨五点
-
-这类节点通常负责给抽象思考提供落点。
-
-#### B. 观念转折节点
-作者真正改写自己理解方式的句子。
-例如：
-- 从“征服”变成“日常”
-- 从“狰狞的恐吓”变成“老朋友的调侃”
-- 从“证明自己”变成“更纯粹的什么东西”
-
-**这类节点必须优先单独立 beat**，不要被吞进前后大段里。
-
-#### C. 哲学锚点节点
-作者用来压住全文意义的句子或意象。
-例如：
-- 石子投入湖面
-- 村上春树句子
-- 墓志铭式收束
-
-这类节点往往不是信息量最大，但它们是结构上的钉子。
-
-### 4. 不要过早抽取答案句
-像“意义已经在了”“选择本身就是意义”这种句子，如果在原文后段才成立，就不能提前变成前段 beat 的核心。
-
-### 5. 物件 / 身体 / 思辨 三层要尽量分开
-- 物件层：奖牌、书架、包装、奖牌框
-- 身体层：35公里、腿部酸痛、上下楼、清晨出门
-- 思辨层：为什么跑、放弃的声音、证明自己、意义的变化
-
-### 6. visual_hint 判断步骤（新增，关键）
-无论是 `preserve_original` 还是 `adapt` 模式，生成 `visual_hint` 前，都必须先完成以下判断：
-
-#### 第一步：现实证据识别
-先回答：**这段原文里，摄影机真正拍得到的东西是什么？**
-优先识别：
-- 物件
-- 身体状态
-- 手部动作
-- 空间关系
-- 使用痕迹
-- 时间痕迹
-
-#### 第二步：信息损失判断
-再回答：**如果把这一 beat 拍成抽象情绪海报，会丢掉哪条关键信息？**
-- 如果会丢掉具体物件关系，就说明画面必须回到物件证据
-- 如果会丢掉身体负荷，就说明画面必须回到身体证据
-- 如果会丢掉作者思维转折，就说明画面必须回到那个转折发生的现实载体
-
-#### 第三步：记忆点判断
-最后回答：**观众在这一 beat 里应该记住的，是哪一个具体画面证据？**
-- 不是一个泛情绪词
-- 不是一张抽象海报
-- 而是一个可被镜头捕捉的东西
-
-### 7. visual_hint 的生成原则
-- 如果是观察节点 → 优先写具体物件与摆放关系
-- 如果是身体节点 → 优先写负荷、重心、呼吸、步态、酸痛痕迹
-- 如果是观念转折节点 → 优先找“能承载这个转折的现实证据”，而不是直接拍抽象哲学
-- 如果是哲学锚点节点 → 优先找文本中已有意象（如石子、奖牌、墓志铭），不要临时发明新的空泛象征
-- 优先使用“现实证据画面”而不是“结论海报画面”
-
-### 8. 先问“这段原文在思维上推进了什么”，再问“它适合什么镜头”
-不是反过来。
-
-## voiceover 规则（基于 Q5 + VO 改写权限）
-
-先判断 `director_intent` 中是否存在 `q5b_voiceover_rewrite`：
-
-- 若 `q5b_voiceover_rewrite = preserve_original`：
-  - `voiceover` 必须直接来自原文原句/原段切分
-  - 允许拆分、分配到不同 beat
-  - 不允许改写措辞、压缩意思、换一种表达重写
-  - **拆分优先级必须先服从作者思维推进顺序，再服从影视节奏**
-  - **不要为了做成“更像短视频”而提前抽取结论句、金句、哲学答案**
-  - **必须优先保留原文中真正构成思维推进的节点**，例如：
-    - 物件观察（奖牌框 / 书架 / 未拆封）
-    - 身体经验（35公里后的拉扯 / 酸痛 / 清晨五点）
-    - 观念转折（从征服到日常 / 从证明自己到更纯粹）
-    - 哲思触发（石子投入湖面 / 村上春树 / 墓志铭）
-  - **不能把“作者经过铺垫后才抵达的答案”提前拿出来当成前段 beat 的核心**
-- 若 `q5b_voiceover_rewrite = adapt`：
-  - 第一人称内心独白 → 可用个人语气精简 content
-  - 第三者叙述 → 可用旁观者口吻重新叙述
-  - 无旁白 → voiceover = ""
-- 若未提供该字段：默认按旧逻辑执行，但应优先保持与用户原文接近
-
-## 输出格式
+## 输出要求
+输出 JSON 对象：
 
 ```json
 {
   "beats": [
     {
       "beat_id": "B01",
-      "content": "逐字复制原文",
-      "voiceover": "旁白内容（若 preserve_original 则必须来自原文原句/原段，不得改写）",
+      "content": "...",
+      "source_excerpt": "...",
+      "voiceover": "...",
       "voiceover_perspective": "第一人称内心独白/第三者叙述",
-      "voiceover_tone": "犹豫/冷静/温暖...",
-      "scene": "地铁车厢，凌晨",
+      "voiceover_tone": "...",
       "narrative_function": "建置/催化/转折/高潮/结局",
       "three_act_position": "act_1/act_2/act_3",
-      "duration_estimate": 8,
-      "visual_hint": "景别+主体+物件/动作/空间关系+光影（必须是摄影机能拍到的具体画面，不得偷换成模板化抒情意象）",
-      "emotion": "冷寂/麻木/渴望...",
-      "emotion_intensity": 1-10,
-      "characters": ["陈明", "店员"],  // 这场戏里出现的角色名列表（来自角色档案）
-      "key_visual_moment": true,
+      "duration_estimate": 6,
+      "emotion": "...",
+      "emotion_intensity": 1,
+      "characters": [],
+      "key_visual_moment": false,
       "transition_to_next": "硬切/Dissolve/Fade"
     }
   ],
-  "duration_total_estimate": 120,
-  "duration_target": 120
+  "duration_total_estimate": 60,
+  "duration_target": 60
 }
 ```
 
+## 字段要求
+- `beat_id` 必须与输入完全一致
+- `source_excerpt` 必须原样保留，不改写，不挪用到别的 beat
+- `content` 仅表达当前 beat 对应的 `source_excerpt` 与 `description`
+- `narrative_function` 以输入中的 `function` 为准
+- 不输出 `scene`
+- 不输出 `visual_hint`
+- `characters` 为本 beat 出现的角色名数组，没有则为空数组
+- `duration_total_estimate` 为所有 beat 时长总和
+
+## 旁白规则
+若 `director_intent.q5b_voiceover_rewrite = preserve_original`：
+- `voiceover` 必须来自当前 beat 的 `source_excerpt`
+- 只允许做切分，不允许改写，不允许引用其他 beat 的原文
+
+若 `director_intent.q5_voiceover_type` 指定无旁白：
+- `voiceover` 置空字符串
+
+## 硬约束
+- 当前 beat 只能依据自己的 `source_excerpt` 和自身描述生成字段
+- 不允许使用其他 beat 的原文内容来补当前 beat
+- 不允许重新决定 beat 边界
+
 ## 自检
-- [ ] beats 数量 × 平均时长 ≈ duration_target
-- [ ] key_visual_moment 场景有丰富 visual_hint
-- [ ] 所有 voiceover 基于 Q5 类型 + `q5b_voiceover_rewrite` 规则生成
-- [ ] 若 `q5b_voiceover_rewrite = preserve_original`，所有 voiceover 都可追溯到用户原文，不得改写
-- [ ] 每个 beat 有 `characters` 字段（列出本 beat 出现的角色名）
+- [ ] 输出为合法 JSON
+- [ ] `beats` 为数组且非空
+- [ ] beat 数量与输入 `beat_skeleton` 一致
+- [ ] 所有 `beat_id`、顺序、`source_excerpt` 与输入一致
+- [ ] 没有输出 `scene`
+- [ ] 没有输出 `visual_hint`

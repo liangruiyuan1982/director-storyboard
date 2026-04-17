@@ -16,26 +16,39 @@ def phase1_story_dna(project_dir, run_llm, load_json, save_json, mark_step_runni
 def phase2_beats(project_dir, run_llm, load_json, save_json, mark_step_running, mark_step_done, update_progress, generate_beats_viewer, model="glm51"):
     mark_step_running(project_dir, "phase2_beats", ["story.txt", "director_intent.json", "story_dna.json"])
     update_progress(project_dir, "phase2", "running")
-    story_text = open(Path(project_dir) / "story.txt", encoding="utf-8").read()
     story_dna = load_json(Path(project_dir) / "story_dna.json")
     intent = load_json(Path(project_dir) / "director_intent.json")
-    beats_validation = {"type": "object", "key": "beats", "min_items": 1}
-    beats = run_llm("beat_analysis.md", {"story_text": story_text, "story_dna": story_dna, "director_intent": intent}, model=model, validation=beats_validation)
+
+    narrative_functions = story_dna.get("narrative_functions", {})
+    beat_ids = sorted(narrative_functions.keys())
+    beat_skeleton = [
+        {
+            "beat_id": beat_id,
+            "function": narrative_functions[beat_id].get("function", ""),
+            "description": narrative_functions[beat_id].get("description", ""),
+            "source_excerpt": narrative_functions[beat_id].get("source_excerpt", "")
+        }
+        for beat_id in beat_ids
+    ]
+
+    beats_validation = {"type": "object", "key": "beats", "min_items": len(beat_skeleton) or 1}
+    beats = run_llm(
+        "beat_analysis.md",
+        {"story_dna": story_dna, "director_intent": intent, "beat_skeleton": beat_skeleton},
+        model=model,
+        validation=beats_validation
+    )
     if intent.get("q5b_voiceover_rewrite") == "preserve_original":
         for beat in beats.get("beats", []):
-            beat["voiceover"] = beat.get("content", "")
+            beat["voiceover"] = beat.get("source_excerpt", "")
     elif intent.get("q5_voiceover_type", "").startswith("C"):
         for beat in beats.get("beats", []):
             beat["voiceover"] = ""
 
     visual_input = {
-        "story_text": story_text,
         "director_intent": intent,
         "story_dna": story_dna,
-        "beats": [
-            {k: v for k, v in beat.items() if k not in ("scene", "visual_hint")}
-            for beat in beats.get("beats", [])
-        ]
+        "beats": beats.get("beats", [])
     }
     visual_validation = {"type": "object", "key": "beats", "min_items": len(beats.get("beats", [])) or 1}
     visual_plan = run_llm("visual_hint_generation.md", visual_input, model=model, validation=visual_validation)

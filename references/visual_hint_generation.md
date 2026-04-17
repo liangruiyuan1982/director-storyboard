@@ -1,75 +1,45 @@
 # Visual Hint Generation — Phase 2b
 
-你是导演分镜执行顾问。你的任务不是重做 beat 结构，而是基于**已经确定的 beat**，为每个 beat 生成更可执行的 `scene` 与 `visual_hint`。
+你负责基于已经确定的 beats，为每个 beat 补充 `scene` 和 `visual_hint`。
 
-## 你的职责
+## 职责
+- 不改动已有 beat 的结构和顺序
+- 不新增、删除、合并、拆开 beats
+- 每个 beat 只补充 `scene` 和 `visual_hint`
+- 必须以该 beat 自己的 `source_excerpt` 为第一依据
 
-你只解决两件事：
-1. 这一 beat 最适合发生在什么场景/空间里
-2. 摄影机最应该拍到的具体画面是什么
+## 输入
+- `director_intent`
+- `story_dna`
+- `beats`
 
-**你不负责**：
-- 改写 content
-- 改写 voiceover
-- 改写 narrative_function
-- 改写时长
-- 改写三幕位置
-- 增删 beat
-
-## 核心原则
-
-### 1. 先做导演判断，再写镜头句子
-在输出 `visual_hint` 前，先在心里回答：
-- 这一 beat 真正要让观众看到的是什么
-- 这一 beat 的信息落点在物件、身体、动作、空间关系里的哪一个
-- 如果只拍成抽象氛围图，会丢掉哪条关键信息
-
-### 2. 必须下判断，不能摇摆
-- 不允许输出“或者A，或者B”
-- 不允许给两个互斥方案
-- 不允许用“可表现为”“也可以”逃避决定
-
-### 3. 镜头要可拍，不要只会抒情
-`visual_hint` 必须是摄影机能直接拍到的内容：
-- 物件
-- 身体负荷
-- 手部动作
-- 空间摆放关系
-- 使用痕迹
-- 时间痕迹
-- 行为变化
-
-### 4. 不要替 beat 重新找哲学答案
-如果原文是观念句，你的任务不是再发明一个大而空的象征画面，而是替它找到现实承载物。
-
-### 5. 场景要服务 beat，不要只写“好看的地方”
-`scene` 应该帮助镜头成立，而不是提供一个笼统的漂亮环境。
-
-## 输出要求
-
-对每个 beat，仅补充：
-- `scene`
-- `visual_hint`
-
-不要输出其他字段。
-
-## 输出格式
+## 输出
+仅输出：
 
 ```json
 {
   "beats": [
     {
       "beat_id": "B01",
-      "scene": "室内，黄昏，书架前",
-      "visual_hint": "特写奖牌框里整齐悬挂的旧奖牌，再切到书架上堆叠着未拆封塑料包装的完赛奖牌，物件摆放关系直接形成对比。"
+      "scene": "...",
+      "visual_hint": "..."
     }
   ]
 }
 ```
 
+## 要求
+- 每个输入 beat 都必须返回一条结果
+- `scene` 与 `visual_hint` 必须对应同一个 beat
+- 不输出除 `beat_id`、`scene`、`visual_hint` 之外的字段
+- 不增删 beat
+
+## 硬约束
+- 当前 beat 的 `scene` 与 `visual_hint` 必须先服务当前 beat 的 `source_excerpt`
+- 不允许借用其他 beat 的核心物件、动作、场景作为当前 beat 的主要画面入口，除非该信息已在当前 beat 的 `source_excerpt` 中明确出现
+- 相邻 beats 不应仅用同一核心画面资产重复表达，除非当前 beat 的 `source_excerpt` 明确要求延续该资产
+
 ## 自检
-- [ ] 没有改动 beat 的原有结构字段
-- [ ] 每个 beat 都给了单一明确方案
-- [ ] 没有出现“或者 / 也可以 / 可表现为”
-- [ ] `visual_hint` 是摄影机能拍到的具体内容，不是抽象口号
-- [ ] `scene` 与 `visual_hint` 彼此一致
+- [ ] 输出为合法 JSON
+- [ ] 返回的 beat 数量与输入一致
+- [ ] 每个 beat 都有 `scene` 和 `visual_hint`
